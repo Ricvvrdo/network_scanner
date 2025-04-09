@@ -1,14 +1,12 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
-import argparse
 import ipaddress
 import socket
 import subprocess
 import platform
-from concurrent.futures import ThreadPoolExecutor
-import struct
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import time
 
-# Constantes para el escaneo SYN (requiere permisos de root)
 try:
     from scapy.all import IP, TCP, sr1, conf
     SCAPY_AVAILABLE = True
@@ -17,77 +15,98 @@ except ImportError:
 
 class NetworkScanner:
     @staticmethod
-    def tcp_connect_scan(host, port, timeout=1):
-        """Escaneo TCP Connect (estándar, no requiere privilegios)"""
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(timeout)
+    def ping_host(ip, timeout=1):
+        """Realiza ping a un host"""
+        sistema = platform.system()
+        param = "-n" if sistema == "Windows" else "-c"
+        timeout_param = "-w" if sistema == "Windows" else "-W"
+        timeout_val = str(timeout * 1000) if sistema == "Windows" else str(timeout)
+        
+        command = ["ping", param, "1", timeout_param, timeout_val, ip]
         try:
-            sock.connect((host, port))
-            sock.close()
-            return True
-        except (socket.timeout, ConnectionRefusedError):
+            output = subprocess.run(command, stdout=subprocess.PIPE, 
+                                   stderr=subprocess.PIPE, timeout=timeout+1)
+            return output.returncode == 0
+        except:
             return False
+
+    @staticmethod
+    def scan_network(subnet):
+        """Escanea una subred para hosts activos"""
+        try:
+            network = ipaddress.ip_network(subnet, strict=False)
+            active_hosts = []
+            
+            with ThreadPoolExecutor(max_workers=100) as executor:
+                futures = {executor.submit(NetworkScanner.ping_host, str(host)): host 
+                          for host in network.hosts()}
+                
+                for future in as_completed(futures):
+                    host = futures[future]
+                    if future.result():
+                        active_hosts.append(str(host))
+            
+            return active_hosts
+        except ValueError as e:
+            raise ValueError(f"Subred no válida: {str(e)}")
+
+    @staticmethod
+    def tcp_connect_scan(host, port, timeout=1):
+        """Escaneo TCP Connect (estándar)"""
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.settimeout(timeout)
+                result = sock.connect_ex((host, port))
+                return result == 0
         except Exception as e:
-            print(f"Error en TCP Connect scan: {e}")
+            print(f"Error TCP Connect en puerto {port}: {e}")
             return False
 
     @staticmethod
     def syn_scan(host, port, timeout=1):
-        """Escaneo SYN (requiere permisos de root y scapy)"""
+        """Escaneo SYN (requiere scapy y permisos root)"""
         if not SCAPY_AVAILABLE:
-            raise ImportError("Scapy no está instalado. Usando TCP Connect como fallback.")
+            raise ImportError("Scapy no está instalado")
         
-        conf.verb = 0  # Silenciar scapy
-        packet = IP(dst=host)/TCP(dport=port, flags="S")
+        conf.verb = 0
         try:
-            response = sr1(packet, timeout=timeout, verbose=0)
-            if response and response.haslayer(TCP):
+            pkt = IP(dst=host)/TCP(dport=port, flags="S")
+            response = sr1(pkt, timeout=timeout, verbose=0)
+            
+            if response is None:
+                return False
+            elif response.haslayer(TCP):
                 if response.getlayer(TCP).flags == 0x12:  # SYN-ACK
-                    # Enviamos RST para cerrar la conexión
-                    rst_pkt = IP(dst=host)/TCP(dport=port, flags="R")
-                    sr1(rst_pkt, timeout=timeout, verbose=0)
+                    # Enviamos RST para cerrar
+                    sr1(IP(dst=host)/TCP(dport=port, flags="R"), 
+                        timeout=timeout, verbose=0)
                     return True
                 elif response.getlayer(TCP).flags == 0x14:  # RST-ACK
                     return False
             return False
         except Exception as e:
-            print(f"Error en SYN scan: {e}")
+            print(f"Error SYN scan en puerto {port}: {e}")
             return False
 
     @staticmethod
     def udp_scan(host, port, timeout=1):
-        """Escaneo UDP (menos fiable que TCP)"""
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.settimeout(timeout)
+        """Escaneo UDP (menos fiable)"""
         try:
-            # Enviamos un paquete vacío (podría ser específico del protocolo)
-            sock.sendto(b'', (host, port))
-            
-            # Intentamos recibir una respuesta
-            data, addr = sock.recvfrom(1024)
-            return True
-        except socket.timeout:
-            # Podría estar abierto o filtrando
-            return None  # Indeterminado
-        except ConnectionRefusedError:
-            return False
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+                sock.settimeout(timeout)
+                sock.sendto(b'', (host, port))
+                
+                try:
+                    data, addr = sock.recvfrom(1024)
+                    return True
+                except socket.timeout:
+                    # Posiblemente abierto o filtrado
+                    return None
+                except ConnectionRefusedError:
+                    return False
         except Exception as e:
-            print(f"Error en UDP scan: {e}")
+            print(f"Error UDP scan en puerto {port}: {e}")
             return False
-        finally:
-            sock.close()
-
-    @staticmethod
-    def ping_host(ip, timeout=1):
-        """Realiza un ping al host"""
-        sistema = platform.system()
-        if sistema == "Windows":
-            comando = ["ping", "-n", "1", "-w", str(timeout * 1000), str(ip)]
-        else:
-            comando = ["ping", "-c", "1", "-W", str(timeout), str(ip)]
-
-        resultado = subprocess.run(comando, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        return resultado.returncode == 0
 
     @staticmethod
     def scan_ports(host, ports, scan_type="TCP", timeout=1):
@@ -100,76 +119,135 @@ class NetworkScanner:
             "UDP": NetworkScanner.udp_scan
         }.get(scan_type, NetworkScanner.tcp_connect_scan)
 
+        start_time = time.time()
+        
         with ThreadPoolExecutor(max_workers=100) as executor:
-            futures = {executor.submit(scan_method, host, port, timeout): port for port in ports}
-            for future in futures:
+            futures = {executor.submit(scan_method, host, port, timeout): port 
+                      for port in ports}
+            
+            for future in as_completed(futures):
                 port = futures[future]
                 try:
-                    if future.result():
-                        open_ports.append(port)
+                    result = future.result()
+                    if result:  # True o None (para UDP)
+                        open_ports.append((port, result))
                 except Exception as e:
                     print(f"Error escaneando puerto {port}: {e}")
-
-        return open_ports
+        
+        duration = time.time() - start_time
+        return open_ports, duration
 
 class NetworkScannerApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Escáner de Red Avanzado")
-        self.root.geometry("600x500")
+        self.root.title("Advanced Network Scanner")
+        self.root.geometry("800x650")
         
         self.create_widgets()
+        self.setup_style()
+        
+    def setup_style(self):
+        style = ttk.Style()
+        style.configure("TFrame", background="#f0f0f0")
+        style.configure("TLabel", background="#f0f0f0")
+        style.configure("TButton", padding=5)
+        style.configure("Red.TButton", foreground="red")
         
     def create_widgets(self):
-        # Frame de configuración
-        config_frame = ttk.LabelFrame(self.root, text="Configuración de Escaneo", padding=10)
-        config_frame.pack(fill=tk.X, padx=10, pady=5)
+        main_frame = ttk.Frame(self.root)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
-        # Subred
-        ttk.Label(config_frame, text="Subred (ej. 192.168.1.0/24):").grid(row=0, column=0, sticky=tk.W)
-        self.entry_subred = ttk.Entry(config_frame, width=30)
-        self.entry_subred.grid(row=0, column=1, padx=5, pady=2, sticky=tk.W)
+        # Notebook (Pestañas)
+        notebook = ttk.Notebook(main_frame)
+        notebook.pack(fill=tk.BOTH, expand=True)
         
-        # Host individual
-        ttk.Label(config_frame, text="Host individual:").grid(row=1, column=0, sticky=tk.W)
-        self.entry_host = ttk.Entry(config_frame, width=30)
-        self.entry_host.grid(row=1, column=1, padx=5, pady=2, sticky=tk.W)
+        # Pestaña de Subred
+        subnet_tab = ttk.Frame(notebook)
+        notebook.add(subnet_tab, text="Subred Scan")
         
-        # Puertos
-        ttk.Label(config_frame, text="Puertos (ej. 80,443 o 1-100):").grid(row=2, column=0, sticky=tk.W)
-        self.entry_ports = ttk.Entry(config_frame, width=30)
-        self.entry_ports.grid(row=2, column=1, padx=5, pady=2, sticky=tk.W)
+        self.create_subnet_tab(subnet_tab)
         
-        # Tipo de escaneo
-        ttk.Label(config_frame, text="Tipo de escaneo:").grid(row=3, column=0, sticky=tk.W)
-        self.scan_type = tk.StringVar(value="TCP")
-        scan_options = ["TCP", "SYN", "UDP"] if SCAPY_AVAILABLE else ["TCP", "UDP"]
-        self.scan_menu = ttk.OptionMenu(config_frame, self.scan_type, "TCP", *scan_options)
-        self.scan_menu.grid(row=3, column=1, padx=5, pady=2, sticky=tk.W)
+        # Pestaña de Puertos
+        port_tab = ttk.Frame(notebook)
+        notebook.add(port_tab, text="Port Scan")
         
-        # Opciones adicionales
-        self.scan_all = tk.BooleanVar()
-        ttk.Checkbutton(config_frame, text="Escanear puertos comunes (1-1024)", variable=self.scan_all).grid(row=4, column=0, columnspan=2, sticky=tk.W)
+        self.create_port_tab(port_tab)
         
-        # Botón de escaneo
-        ttk.Button(config_frame, text="Iniciar Escaneo", command=self.start_scan).grid(row=5, column=0, columnspan=2, pady=10)
+        # Área de resultados
+        result_frame = ttk.LabelFrame(main_frame, text="Resultados", padding=10)
+        result_frame.pack(fill=tk.BOTH, expand=True, pady=10)
         
-        # Frame de resultados
-        result_frame = ttk.LabelFrame(self.root, text="Resultados", padding=10)
-        result_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        self.result_text = tk.Text(result_frame, wrap=tk.WORD, font=("Consolas", 10))
+        scrollbar = ttk.Scrollbar(result_frame, command=self.result_text.yview)
+        self.result_text.configure(yscrollcommand=scrollbar.set)
         
-        self.result_text = tk.Text(result_frame, wrap=tk.WORD)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.result_text.pack(fill=tk.BOTH, expand=True)
         
         # Barra de estado
         self.status_var = tk.StringVar(value="Listo")
-        ttk.Label(self.root, textvariable=self.status_var, relief=tk.SUNKEN).pack(fill=tk.X, padx=10, pady=5)
+        status_bar = ttk.Label(main_frame, textvariable=self.status_var, 
+                              relief=tk.SUNKEN, anchor=tk.W)
+        status_bar.pack(fill=tk.X, padx=10, pady=5)
+    
+    def create_subnet_tab(self, parent):
+        ttk.Label(parent, text="Subred (ej. 192.168.1.0/24):").grid(
+            row=0, column=0, padx=5, pady=5, sticky=tk.W)
+        
+        self.entry_subnet = ttk.Entry(parent, width=25)
+        self.entry_subnet.grid(row=0, column=1, padx=5, pady=5, sticky=tk.W)
+        
+        ttk.Label(parent, text="Timeout (seg):").grid(
+            row=1, column=0, padx=5, pady=5, sticky=tk.W)
+        
+        self.entry_subnet_timeout = ttk.Entry(parent, width=5)
+        self.entry_subnet_timeout.insert(0, "1")
+        self.entry_subnet_timeout.grid(row=1, column=1, padx=5, pady=5, sticky=tk.W)
+        
+        scan_btn = ttk.Button(parent, text="Escanear Subred", 
+                            command=self.scan_subnet)
+        scan_btn.grid(row=2, column=0, columnspan=2, pady=10)
+    
+    def create_port_tab(self, parent):
+        ttk.Label(parent, text="Host o IP:").grid(
+            row=0, column=0, padx=5, pady=5, sticky=tk.W)
+        
+        self.entry_host = ttk.Entry(parent, width=25)
+        self.entry_host.grid(row=0, column=1, padx=5, pady=5, sticky=tk.W)
+        
+        ttk.Label(parent, text="Puertos (ej. 80,443 o 1-100):").grid(
+            row=1, column=0, padx=5, pady=5, sticky=tk.W)
+        
+        self.entry_ports = ttk.Entry(parent, width=25)
+        self.entry_ports.insert(0, "1-1024")
+        self.entry_ports.grid(row=1, column=1, padx=5, pady=5, sticky=tk.W)
+        
+        ttk.Label(parent, text="Tipo de Escaneo:").grid(
+            row=2, column=0, padx=5, pady=5, sticky=tk.W)
+        
+        self.scan_type = tk.StringVar(value="TCP")
+        scan_options = ["TCP", "SYN", "UDP"] if SCAPY_AVAILABLE else ["TCP", "UDP"]
+        self.scan_menu = ttk.OptionMenu(
+            parent, self.scan_type, "TCP", *scan_options)
+        self.scan_menu.grid(row=2, column=1, padx=5, pady=5, sticky=tk.W)
+        
+        ttk.Label(parent, text="Timeout (seg):").grid(
+            row=3, column=0, padx=5, pady=5, sticky=tk.W)
+        
+        self.entry_port_timeout = ttk.Entry(parent, width=5)
+        self.entry_port_timeout.insert(0, "1")
+        self.entry_port_timeout.grid(row=3, column=1, padx=5, pady=5, sticky=tk.W)
+        
+        scan_btn = ttk.Button(parent, text="Escanear Puertos", 
+                            command=self.scan_ports)
+        scan_btn.grid(row=4, column=0, columnspan=2, pady=10)
     
     def process_ports(self, port_str):
         """Convierte el string de puertos a una lista de números"""
         ports = set()
         parts = port_str.split(",")
         for part in parts:
+            part = part.strip()
             if "-" in part:
                 start, end = map(int, part.split("-"))
                 ports.update(range(start, end + 1))
@@ -182,80 +260,118 @@ class NetworkScannerApp:
         common_services = {
             21: "FTP", 22: "SSH", 23: "Telnet", 25: "SMTP", 53: "DNS",
             80: "HTTP", 110: "POP3", 143: "IMAP", 443: "HTTPS",
-            3306: "MySQL", 3389: "RDP", 5900: "VNC", 8080: "HTTP-Alt"
+            3306: "MySQL", 3389: "RDP", 5900: "VNC", 8080: "HTTP-Alt",
+            27017: "MongoDB", 5432: "PostgreSQL", 6379: "Redis"
         }
         return {port: common_services.get(port, "Desconocido") for port in ports}
     
-    def start_scan(self):
-        """Inicia el escaneo según los parámetros configurados"""
-        subred = self.entry_subred.get()
-        host = self.entry_host.get()
-        port_str = self.entry_ports.get()
-        scan_type = self.scan_type.get()
-        scan_all = self.scan_all.get()
+    def scan_subnet(self):
+        """Escanea una subred completa"""
+        subnet = self.entry_subnet.get()
+        
+        try:
+            timeout = float(self.entry_subnet_timeout.get())
+        except ValueError:
+            timeout = 1.0
+        
+        if not subnet:
+            messagebox.showwarning("Advertencia", "Debe especificar una subred")
+            return
         
         self.result_text.delete(1.0, tk.END)
-        self.status_var.set("Escaneando...")
+        self.status_var.set(f"Escaneando subred {subnet}...")
         self.root.update()
         
         try:
-            # Escaneo de hosts activos
-            if subred:
-                self.result_text.insert(tk.END, f"Escaneando subred: {subred}\n")
-                active_hosts = self.scan_network(subred)
-                self.result_text.insert(tk.END, "\nHosts activos:\n")
-                for h in active_hosts:
-                    self.result_text.insert(tk.END, f" - {h}\n")
+            active_hosts = NetworkScanner.scan_network(subnet)
             
-            # Escaneo de puertos
-            if host:
-                if scan_all:
-                    ports = list(range(1, 1025))
-                elif port_str:
-                    ports = self.process_ports(port_str)
-                else:
-                    messagebox.showwarning("Advertencia", "Debe especificar puertos o seleccionar 'Escanear puertos comunes'")
-                    self.status_var.set("Listo")
-                    return
-                
-                self.result_text.insert(tk.END, f"\nEscaneando {scan_type} puertos en {host}...\n")
-                open_ports = NetworkScanner.scan_ports(host, ports, scan_type)
-                
-                if open_ports:
-                    services = self.detect_services(open_ports)
-                    self.result_text.insert(tk.END, "\nPuertos abiertos:\n")
-                    for port in sorted(open_ports):
-                        self.result_text.insert(tk.END, f" - Puerto {port}: {services[port]}\n")
-                else:
-                    self.result_text.insert(tk.END, "\nNo se encontraron puertos abiertos.\n")
+            self.result_text.insert(tk.END, f"=== RESULTADOS SUBRED ===\n")
+            self.result_text.insert(tk.END, f"Subred: {subnet}\n")
+            self.result_text.insert(tk.END, f"Hosts activos encontrados: {len(active_hosts)}\n\n")
             
-            self.status_var.set("Escaneo completado")
+            for host in active_hosts:
+                self.result_text.insert(tk.END, f"• {host}\n")
+            
+            self.status_var.set(
+                f"Escaneo completado - {len(active_hosts)} hosts activos en {subnet}")
         except Exception as e:
-            messagebox.showerror("Error", f"Ocurrió un error: {str(e)}")
-            self.status_var.set("Error")
+            messagebox.showerror("Error", f"Error escaneando subred: {str(e)}")
+            self.status_var.set("Error en escaneo de subred")
         finally:
             self.root.update()
     
-    def scan_network(self, subnet):
-        """Escanea una subred para encontrar hosts activos"""
+    def scan_ports(self):
+        """Escanea puertos en un host específico"""
+        host = self.entry_host.get()
+        port_str = self.entry_ports.get()
+        scan_type = self.scan_type.get()
+        
         try:
-            network = ipaddress.ip_network(subnet, strict=False)
-            active_hosts = []
+            timeout = float(self.entry_port_timeout.get())
+        except ValueError:
+            timeout = 1.0
+        
+        if not host:
+            messagebox.showwarning("Advertencia", "Debe especificar un host o IP")
+            return
+        
+        self.result_text.delete(1.0, tk.END)
+        self.status_var.set(f"Iniciando escaneo {scan_type} en {host}...")
+        self.root.update()
+        
+        try:
+            # Resolver el hostname si es necesario
+            try:
+                ip = socket.gethostbyname(host)
+            except socket.gaierror:
+                ip = host
             
-            with ThreadPoolExecutor(max_workers=100) as executor:
-                futures = {executor.submit(NetworkScanner.ping_host, str(host)): host 
-                          for host in network.hosts()}
+            # Procesar los puertos a escanear
+            ports = self.process_ports(port_str)
+            
+            self.result_text.insert(tk.END, f"=== ESCANEO DE PUERTOS ===\n")
+            self.result_text.insert(tk.END, f"Host: {host} ({ip})\n")
+            self.result_text.insert(tk.END, f"Tipo: {scan_type}\n")
+            self.result_text.insert(tk.END, f"Puertos: {port_str}\n")
+            self.result_text.insert(tk.END, f"Timeout: {timeout} segundos\n\n")
+            
+            # Realizar el escaneo
+            open_ports, duration = NetworkScanner.scan_ports(ip, ports, scan_type, timeout)
+            
+            # Mostrar resultados
+            if open_ports:
+                services = self.detect_services([port for port, _ in open_ports])
+                self.result_text.insert(tk.END, "PUERTOS ABIERTOS:\n")
                 
-                for future in futures:
-                    host = futures[future]
-                    if future.result():
-                        active_hosts.append(str(host))
+                for port, status in sorted(open_ports, key=lambda x: x[0]):
+                    service = services.get(port, "Desconocido")
+                    status_text = "Abierto" if status is True else "Filtrado (UDP)" if status is None else "Cerrado"
+                    self.result_text.insert(tk.END, 
+                        f"• Puerto {port:5} - {service:15} - {status_text}\n")
+            else:
+                self.result_text.insert(tk.END, "No se encontraron puertos abiertos.\n")
             
-            return active_hosts
-        except ValueError as e:
-            raise ValueError(f"Subred no válida: {str(e)}")
+            self.result_text.insert(tk.END, f"\nEscaneo completado en {duration:.2f} segundos\n")
+            self.status_var.set(
+                f"Escaneo {scan_type} completado - {len(open_ports)} puertos abiertos en {host}")
+        except ImportError as e:
+            messagebox.showerror("Error", 
+                f"Escaneo SYN requiere Scapy. Instale con: pip install scapy")
+            self.status_var.set("Error: Scapy no instalado")
+        except Exception as e:
+            messagebox.showerror("Error", f"Error en escaneo de puertos: {str(e)}")
+            self.status_var.set("Error en escaneo de puertos")
+        finally:
+            self.root.update()
 
 if __name__ == "__main__":
     root = tk.Tk()
     app = NetworkScannerApp(root)
+    
+    # Mostrar advertencia si Scapy no está disponible
+    if not SCAPY_AVAILABLE:
+        messagebox.showwarning(
+            "Advertencia", 
+            "El escaneo SYN no está disponible. Instale Scapy con: pip install scapy")
+    
     root.mainloop()
