@@ -1,0 +1,9 @@
+Dependencias principales:
+Tkinter >>> Para la interfaz grafica
+Dependencias de Python:
+argparse >>> Para el analisis de argumentos
+ipaddress >>> Para el manejo de direcciones IP y de subredes
+socket >>> Para escaneo de puertos
+subprocess >>> Para ejecutar el comando PING
+plataform >>> Para detectar el sistema operativo
+concurrent.futures >>> Para ejecuciòn paralela con ThreadPoolExecutor
