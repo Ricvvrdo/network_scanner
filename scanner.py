@@ -1,11 +1,12 @@
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 import ipaddress
 import socket
 import subprocess
 import platform
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
+from datetime import datetime
 
 # Configuración de puertos comunes
 PUERTOS_COMUNES = {
@@ -172,6 +173,7 @@ class NetworkScannerApp:
         style.configure("TButton", font=('Arial', 10), padding=5)
         style.configure("TNotebook", font=('Arial', 10, 'bold'))
         style.configure("TNotebook.Tab", font=('Arial', 10), padding=[10, 5])
+        style.configure("Bold.TButton", font=('Arial', 10, 'bold'))
         
     def create_widgets(self):
         main_frame = ttk.Frame(self.root)
@@ -179,17 +181,26 @@ class NetworkScannerApp:
         
         # Notebook (Pestañas)
         notebook = ttk.Notebook(main_frame)
-        notebook.pack(fill=tk.BOTH, expand=True)
+        notebook.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
         
         # Pestaña de Escaneo de Subred
         self.create_subnet_tab(notebook)
         
-        # Pestaña de Escaneo de Hosts (antes "Escaneo de Puertos")
+        # Pestaña de Escaneo de Hosts
         self.create_hosts_tab(notebook)
+        
+        # Frame para botones inferiores
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(fill=tk.X, pady=5)
+        
+        # Botón para guardar resultados
+        save_button = ttk.Button(button_frame, text="Guardar Resultado", 
+                               command=self.save_results, style="Bold.TButton")
+        save_button.pack(side=tk.LEFT, padx=5)
         
         # Área de resultados
         result_frame = ttk.LabelFrame(main_frame, text="Resultados", padding=10)
-        result_frame.pack(fill=tk.BOTH, expand=True, pady=10)
+        result_frame.pack(fill=tk.BOTH, expand=True)
         
         self.result_text = tk.Text(result_frame, wrap=tk.WORD, font=("Consolas", 10))
         scrollbar = ttk.Scrollbar(result_frame, command=self.result_text.yview)
@@ -201,8 +212,8 @@ class NetworkScannerApp:
         # Barra de estado
         self.status_var = tk.StringVar(value="Listo")
         status_bar = ttk.Label(main_frame, textvariable=self.status_var, 
-                              relief=tk.SUNKEN, anchor=tk.W)
-        status_bar.pack(fill=tk.X, padx=10, pady=5)
+                             relief=tk.SUNKEN, anchor=tk.W)
+        status_bar.pack(fill=tk.X, padx=10, pady=(5, 0))
     
     def create_subnet_tab(self, notebook):
         tab = ttk.Frame(notebook)
@@ -253,7 +264,6 @@ class NetworkScannerApp:
         self.port_options_frame.grid_remove()
     
     def create_hosts_tab(self, notebook):
-        """Pestaña renombrada de 'Escaneo de Puertos' a 'Escaneo de Hosts'"""
         tab = ttk.Frame(notebook)
         notebook.add(tab, text="Escaneo de Hosts")
         
@@ -437,6 +447,32 @@ class NetworkScannerApp:
                     self.result_text.insert(tk.END, "\n")
         else:
             self.result_text.insert(tk.END, "No se encontraron puertos abiertos.\n")
+    
+    def save_results(self):
+        """Guarda los resultados del escaneo en un archivo"""
+        content = self.result_text.get("1.0", tk.END)
+        if not content.strip():
+            messagebox.showwarning("Advertencia", "No hay resultados para guardar")
+            return
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        default_filename = f"scan_results_{timestamp}.txt"
+        
+        filepath = filedialog.asksaveasfilename(
+            defaultextension=".txt",
+            filetypes=[("Archivos de texto", "*.txt"), ("Todos los archivos", "*.*")],
+            initialfile=default_filename
+        )
+        
+        if not filepath:
+            return
+        
+        try:
+            with open(filepath, "w", encoding="utf-8") as f:
+                f.write(content)
+            messagebox.showinfo("Éxito", f"Resultados guardados en:\n{filepath}")
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo guardar el archivo:\n{str(e)}")
 
 if __name__ == "__main__":
     root = tk.Tk()
