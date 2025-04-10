@@ -1,9 +1,11 @@
-Dependencias principales:
-Tkinter >>> Para la interfaz grafica
-Dependencias de Python:
-argparse >>> Para el analisis de argumentos
-ipaddress >>> Para el manejo de direcciones IP y de subredes
-socket >>> Para escaneo de puertos
-subprocess >>> Para ejecutar el comando PING
-plataform >>> Para detectar el sistema operativo
-concurrent.futures >>> Para ejecuciòn paralela con ThreadPoolExecutor
+# Bibliotecas principales
+scapy>=2.4.0   >> Escaneo avanzado de puertos (SYN scan) y manipulación de paquetes
+ipaddress>=1.0.0  >> Validación y manipulación de direcciones IP/subredes
+
+# Bibliotecas estándar
+# tkinter       >> Interfaz gráfica (incluida en Python)
+# socket        >> Operaciones de red básicas
+# subprocess    >> Ejecución de comandos del sistema (ping)
+# platform      >> Detección del sistema operativo
+# concurrent.futures  >> Ejecución paralela de escaneos
+# datetime      >> Manejo de timestamps para resultados
