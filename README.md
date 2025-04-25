@@ -1,16 +1,3 @@
-import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
-import ipaddress
-import socket
-import subprocess
-import platform
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import time
-from datetime import datetime
-import threading
-import sys
-import os
-
 # Configuración para evitar ventanas CMD no deseadas
 if getattr(sys, 'frozen', False):
     # Si estamos ejecutando como .exe
