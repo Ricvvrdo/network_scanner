@@ -1,11 +1,19 @@
-# Bibliotecas principales
-scapy>=2.4.0   >> Escaneo avanzado de puertos (SYN scan) y manipulación de paquetes
-ipaddress>=1.0.0  >> Validación y manipulación de direcciones IP/subredes
-
-# Bibliotecas estándar
-# tkinter       >> Interfaz gráfica (incluida en Python)
-# socket        >> Operaciones de red básicas
-# subprocess    >> Ejecución de comandos del sistema (ping)
-# platform      >> Detección del sistema operativo
-# concurrent.futures  >> Ejecución paralela de escaneos
-# datetime      >> Manejo de timestamps para resultados
+# Bibliotecas 
+import tkinter as tk            # GUI principal
+from tkinter import ttk         # Widgets modernos
+from tkinter import messagebox  # Ventanas emergentes
+from tkinter import filedialog  # Diálogos de archivos
+import socket                   # Conexiones de red
+import ipaddress                # Manejo de IPs/subredes
+import subprocess               # Ejecución de comandos
+import platform                 # Info del sistema operativo
+import threading                # Concurrencia
+import time                     # Control de tiempos
+from datetime import datetime   # Manejo de fechas/horas
+import sys                      # Sistema/interprete
+import os                       # Funciones del OS
+# Biblioteca externa
+# Escaneo avanzado (requiere instalación)
+from scapy.all import IP, TCP, sr1, conf  # pip install scapy
+#SI NO HAY UNA BIBLIOTEVA PRINCIPAL (Tkinker, Socket, ipaddress, concurrent.futures, threading) EL PROGRAMA NO SERA EJECUTADO
+#EN CASO DE QUE FALTE UNA BIBLIOTECA SECUNDARIA, EL PROGRAMA SE ADAPATARA. (scapy, subprocess, datetime, os, sys)
