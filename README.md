@@ -1,21 +1,31 @@
-import tkinter as tk            # GUI principal
-from tkinter import ttk         # Widgets modernos
-from tkinter import messagebox  # Ventanas emergentes
-from tkinter import filedialog  # Diálogos de archivos
-import socket                   # Conexiones de red
-import ipaddress                # Manejo de IPs/subredes
-import subprocess               # Ejecución de comandos
-import platform                 # Info del sistema operativo
-import threading                # Concurrencia
-import time                     # Control de tiempos
-from datetime import datetime   # Manejo de fechas/horas
-import sys                      # Sistema/interprete
-import os                       # Funciones del OS
-# Configuración para evitar ventanas CMD no deseadas
-if getattr(sys, 'frozen', False):
-    # Si estamos ejecutando como .exe
-    sys.stdout = open(os.devnull, 'w')
-    sys.stderr = open(os.devnull, 'w')
+# Tkinter es la biblioteca estándar para crear interfaces gráficas de usuario (GUIs) en Python
+import tkinter as tk
+# ttk es una extensión de Tkinter que proporciona widgets con un estilo más moderno
+from tkinter import ttk
+# messagebox se usa para mostrar cuadros de diálogo de mensajes (alertas, confirmaciones, etc.)
+from tkinter import messagebox
+# filedialog proporciona cuadros de diálogo para abrir o guardar archivos
+from tkinter import filedialog
+
+# ipaddress permite trabajar con direcciones IP (validación, manipulación de redes, etc.)
+import ipaddress
+# socket proporciona herramientas para trabajar con conexiones de red, como TCP/IP
+import socket
+# subprocess permite ejecutar procesos del sistema operativo (por ejemplo, comandos en la terminal)
+import subprocess
+# platform ofrece funciones para acceder a información sobre el sistema operativo (ej. Windows, Linux, etc.)
+import platform
+
+# ThreadPoolExecutor y as_completed son herramientas para ejecutar tareas en paralelo (multi-hilo)
+from concurrent.futures import ThreadPoolExecutor, as_completed, FIRST_COMPLETED
+
+# time es un módulo estándar para trabajar con tiempos y pausas
+import time
+# datetime permite trabajar con fechas y horas, por ejemplo, obtener la hora actual
+from datetime import datetime
+
+# threading permite crear y gestionar hilos (threads) para ejecutar tareas en paralelo
+import threading
 
 # Configuración de puertos comunes con sus servicios asociados
 PUERTOS_COMUNES = {
@@ -46,25 +56,29 @@ except ImportError:
 class EscanerRed:
     @staticmethod
     def ping_host(ip, timeout=1, stop_event=None):
-        """Realiza ping a un host usando sockets para evitar ventanas CMD"""
+        """Realiza ping a un host y obtiene su nombre si está disponible"""
         if stop_event and stop_event.is_set():
             return False, None
             
+        sistema = platform.system()
+        param = "-n" if sistema == "Windows" else "-c"
+        timeout_param = "-w" if sistema == "Windows" else "-W"
+        timeout_val = str(timeout * 1000) if sistema == "Windows" else str(timeout)
+        
+        command = ["ping", param, "1", timeout_param, timeout_val, ip]
         try:
-            # Usamos sockets en lugar de subprocess para evitar CMD
-            socket.setdefaulttimeout(timeout)
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.connect((ip, 80))  # Intentamos conectar a un puerto común
-            s.close()
+            output = subprocess.run(command, stdout=subprocess.PIPE, 
+                                   stderr=subprocess.PIPE, timeout=timeout+1)
             
-            # Obtenemos el nombre del host si es posible
+            # Si el ping fue exitoso, intentamos obtener el nombre del host
             host_name = None
-            try:
-                host_name = socket.gethostbyaddr(ip)[0]
-            except (socket.herror, socket.gaierror):
-                host_name = "Nombre no disponible"
+            if output.returncode == 0:
+                try:
+                    host_name = socket.gethostbyaddr(ip)[0]
+                except (socket.herror, socket.gaierror):
+                    host_name = "Nombre no disponible"
             
-            return True, host_name
+            return output.returncode == 0, host_name
         except:
             return False, None
 
@@ -79,7 +93,8 @@ class EscanerRed:
                 sock.settimeout(timeout)
                 result = sock.connect_ex((host, port))
                 return result == 0
-        except Exception:
+        except Exception as e:
+            print(f"Error TCP Connect en puerto {port}: {e}")
             return False
 
     @staticmethod
@@ -106,7 +121,8 @@ class EscanerRed:
                 elif response.getlayer(TCP).flags == 0x14:  # RST-ACK
                     return False
             return False
-        except Exception:
+        except Exception as e:
+            print(f"Error SYN scan en puerto {port}: {e}")
             return False
 
     @staticmethod
@@ -127,7 +143,8 @@ class EscanerRed:
                 
                 banner = s.recv(1024).decode(errors='ignore').strip()
                 return banner.split('\n')[0]  # Primera línea del banner
-        except Exception:
+        except Exception as e:
+            print(f"Error obteniendo banner en {host}:{port} - {e}")
             return None
 
     @staticmethod
@@ -139,8 +156,8 @@ class EscanerRed:
             "SYN": EscanerRed.syn_scan
         }.get(scan_type, EscanerRed.tcp_connect_scan)
 
-        # Reducimos el número de workers para mayor estabilidad
-        with ThreadPoolExecutor(max_workers=15) as executor:
+        # Reducimos el número de workers para mayor compatibilidad
+        with ThreadPoolExecutor(max_workers=20) as executor:
             futures = {executor.submit(scan_method, host, port, timeout, stop_event): port for port in ports}
             
             for future in as_completed(futures):
@@ -155,8 +172,8 @@ class EscanerRed:
                         if get_banners and not (stop_event and stop_event.is_set()):
                             banner = EscanerRed.obtener_banner(host, port, timeout, stop_event)
                         open_ports.append((port, banner))
-                except Exception:
-                    continue
+                except Exception as e:
+                    print(f"Error escaneando puerto {port}: {e}")
         
         return open_ports
 
@@ -169,8 +186,8 @@ class EscanerRed:
             port_results = {}
             host_names = {}  # Diccionario para almacenar nombres de host
             
-            # Reducimos el número de workers para mayor estabilidad
-            with ThreadPoolExecutor(max_workers=15) as executor:
+            # Reducimos el número de workers para mayor compatibilidad
+            with ThreadPoolExecutor(max_workers=20) as executor:
                 futures = {executor.submit(EscanerRed.ping_host, str(host), timeout, stop_event): host for host in network.hosts()}
                 
                 for future in as_completed(futures):
@@ -193,10 +210,11 @@ class EscanerRed:
             
             return active_hosts, port_results, host_names
         except ValueError as e:
-            raise ValueError(f"Subred no válida: {str(e)}")
+            # Mensaje de error en español
+            raise ValueError(f"Subred no válida: '{subnet}' no parece ser una dirección IPv4 o IPv6 válida")
 
 class NetworkScannerApp:
-    def __init__(self, root):
+    def _init_(self, root):
         self.root = root
         self.root.title("Escáner Avanzado de Red")
         self.root.geometry("900x750")
@@ -204,9 +222,8 @@ class NetworkScannerApp:
         # Variables para controlar el escaneo en curso
         self.scan_in_progress = False
         self.scan_cancelled = False
-        self.scan_window = None
-        self.stop_event = None
-        self.executor = None
+        self.scan_window = None  # Referencia a la ventana de escaneo
+        self.stop_event = None   # Evento para detener el escaneo
         
         self.setup_styles()
         self.create_widgets()
@@ -426,7 +443,7 @@ class NetworkScannerApp:
             return self.parse_ports(custom_entry.get())
     
     def parse_ports(self, port_str):
-        """Convierte una cadena de puertos en una lista de números"""
+        """Convierte una cadena de puertos (ej. "80,443,1000-2000") en una lista de números"""
         ports = set()
         parts = port_str.split(",")
         for part in parts:
@@ -450,7 +467,7 @@ class NetworkScannerApp:
         return sorted(ports)
     
     def start_subnet_scan(self):
-        """Inicia el escaneo de subred"""
+        """Inicia el escaneo de subred con manejo de errores en español"""
         if self.scan_in_progress:
             return
             
@@ -485,7 +502,7 @@ class NetworkScannerApp:
         # Crear evento para detener el escaneo
         self.stop_event = threading.Event()
         
-        # Ejecutar el escaneo en un hilo separado
+        # Ejecutar el escaneo en un hilo separado para no bloquear la interfaz
         scan_thread = threading.Thread(
             target=self.run_subnet_scan,
             args=(subnet, ports, scan_ports, timeout),
@@ -494,10 +511,11 @@ class NetworkScannerApp:
         scan_thread.start()
     
     def run_subnet_scan(self, subnet, ports, scan_ports, timeout):
-        """Ejecuta el escaneo de subred en segundo plano"""
+        """Ejecuta el escaneo de subred en segundo plano con manejo de errores en español"""
         try:
             start_time = time.time()
             
+            # Actualizar progreso
             self.root.after(0, lambda: self.update_scan_progress("Buscando hosts activos..."))
             
             active_hosts, port_results, host_names = EscanerRed.escanear_subred(
@@ -512,7 +530,8 @@ class NetworkScannerApp:
             self.on_scan_complete(f"Escaneo completado - {len(active_hosts)} hosts activos")
         except Exception as e:
             self.on_scan_complete("Error en escaneo")
-            self.show_error_message(f"Error en escaneo: {str(e)}")
+            # Mostramos el mensaje de error en español
+            self.show_error_message(f"Error: {str(e)}")
     
     def start_port_scan(self):
         """Inicia el escaneo de puertos en un host individual"""
@@ -547,7 +566,7 @@ class NetworkScannerApp:
         # Crear evento para detener el escaneo
         self.stop_event = threading.Event()
         
-        # Ejecutar el escaneo en un hilo separado
+        # Ejecutar el escaneo en un hilo separado para no bloquear la interfaz
         scan_thread = threading.Thread(
             target=self.run_port_scan,
             args=(host, ports, timeout),
@@ -560,6 +579,7 @@ class NetworkScannerApp:
         try:
             start_time = time.time()
             
+            # Actualizar progreso
             self.root.after(0, lambda: self.update_scan_progress(f"Escaneando puertos en {host}..."))
             
             open_ports = EscanerRed.escanear_puertos(
@@ -615,14 +635,16 @@ class NetworkScannerApp:
             self.scan_window.update()
     
     def cancel_scan(self):
-        """Cancela el escaneo en curso"""
+        """Cancela el escaneo en curso inmediatamente"""
         if self.scan_in_progress:
             self.scan_cancelled = True
             self.status_var.set("Cancelando escaneo...")
             
+            # Activar el evento de detención
             if self.stop_event:
                 self.stop_event.set()
             
+            # Forzar actualización de la interfaz
             self.root.update()
     
     def show_error_message(self, message):
@@ -630,7 +652,7 @@ class NetworkScannerApp:
         self.root.after(0, lambda: messagebox.showerror("Error", message))
     
     def display_subnet_results(self, subnet, active_hosts, port_results, host_names, duration):
-        """Muestra los resultados del escaneo de subred"""
+        """Muestra los resultados del escaneo de subred con nombres de host"""
         self.result_text.insert(tk.END, "=== RESULTADOS DE ESCANEO ===\n")
         self.result_text.insert(tk.END, f"Subred: {subnet}\n")
         self.result_text.insert(tk.END, f"Hosts activos encontrados: {len(active_hosts)}\n")
@@ -655,7 +677,7 @@ class NetworkScannerApp:
             self.result_text.insert(tk.END, f"• {host} ({host_name})\n")
     
     def display_port_results(self, host, host_name, open_ports, duration):
-        """Muestra los resultados del escaneo de puertos"""
+        """Muestra los resultados del escaneo de puertos con nombre de host"""
         self.result_text.insert(tk.END, "=== RESULTADOS DE ESCANEO ===\n")
         self.result_text.insert(tk.END, f"Host: {host} ({host_name})\n")
         self.result_text.insert(tk.END, f"Tipo de escaneo: {self.scan_type_host_var.get()}\n")
@@ -685,7 +707,7 @@ class NetworkScannerApp:
         
         filepath = filedialog.asksaveasfilename(
             defaultextension=".txt",
-            filetypes=[("Archivos de texto", "*.txt"), ("Todos los archivos", "*.*")],
+            filetypes=[("Archivos de texto", ".txt"), ("Todos los archivos", ".*")],
             initialfile=default_filename
         )
         
@@ -699,7 +721,7 @@ class NetworkScannerApp:
         except Exception as e:
             messagebox.showerror("Error", f"No se pudo guardar el archivo:\n{str(e)}")
 
-if __name__ == "__main__":
+if _name_ == "_main_":
     root = tk.Tk()
     app = NetworkScannerApp(root)
     
