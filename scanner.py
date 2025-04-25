@@ -11,13 +11,12 @@ import threading
 import sys
 import os
 
-# Configuración para evitar ventanas CMD no deseadas
 if getattr(sys, 'frozen', False):
     # Si estamos ejecutando como .exe
+    import os
     sys.stdout = open(os.devnull, 'w')
     sys.stderr = open(os.devnull, 'w')
 
-# Configuración de puertos comunes con sus servicios asociados
 PUERTOS_COMUNES = {
     21: "FTP",
     22: "SSH",
@@ -36,7 +35,6 @@ PUERTOS_COMUNES = {
     27017: "MongoDB"
 }
 
-# Intenta importar Scapy para escaneo SYN (requiere permisos root)
 try:
     from scapy.all import IP, TCP, sr1, conf
     SCAPY_AVAILABLE = True
@@ -51,13 +49,11 @@ class EscanerRed:
             return False, None
             
         try:
-            # Usamos sockets en lugar de subprocess para evitar CMD
             socket.setdefaulttimeout(timeout)
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.connect((ip, 80))  # Intentamos conectar a un puerto común
+            s.connect((ip, 80))  
             s.close()
             
-            # Obtenemos el nombre del host si es posible
             host_name = None
             try:
                 host_name = socket.gethostbyaddr(ip)[0]
@@ -122,11 +118,11 @@ class EscanerRed:
                 
                 if port == 80 or port == 443:  # HTTP/HTTPS
                     s.send(b"GET / HTTP/1.1\r\nHost: %s\r\n\r\n" % host.encode())
-                elif port == 21:  # FTP
-                    s.recv(1024)  # Leer banner inicial
+                elif port == 21:  
+                    s.recv(1024)  
                 
                 banner = s.recv(1024).decode(errors='ignore').strip()
-                return banner.split('\n')[0]  # Primera línea del banner
+                return banner.split('\n')[0]  
         except Exception:
             return None
 
@@ -139,7 +135,6 @@ class EscanerRed:
             "SYN": EscanerRed.syn_scan
         }.get(scan_type, EscanerRed.tcp_connect_scan)
 
-        # Reducimos el número de workers para mayor estabilidad
         with ThreadPoolExecutor(max_workers=15) as executor:
             futures = {executor.submit(scan_method, host, port, timeout, stop_event): port for port in ports}
             
@@ -150,7 +145,7 @@ class EscanerRed:
                     
                 port = futures[future]
                 try:
-                    if future.result():  # Si el puerto está abierto
+                    if future.result():
                         banner = None
                         if get_banners and not (stop_event and stop_event.is_set()):
                             banner = EscanerRed.obtener_banner(host, port, timeout, stop_event)
@@ -167,9 +162,8 @@ class EscanerRed:
             network = ipaddress.ip_network(subnet, strict=False)
             active_hosts = []
             port_results = {}
-            host_names = {}  # Diccionario para almacenar nombres de host
+            host_names = {}
             
-            # Reducimos el número de workers para mayor estabilidad
             with ThreadPoolExecutor(max_workers=15) as executor:
                 futures = {executor.submit(EscanerRed.ping_host, str(host), timeout, stop_event): host for host in network.hosts()}
                 
@@ -183,7 +177,7 @@ class EscanerRed:
                     if is_active:
                         host_str = str(host)
                         active_hosts.append(host_str)
-                        host_names[host_str] = host_name  # Almacenamos el nombre del host
+                        host_names[host_str] = host_name
                         
                         if scan_ports and ports and not (stop_event and stop_event.is_set()):
                             open_ports = EscanerRed.escanear_puertos(
@@ -196,12 +190,11 @@ class EscanerRed:
             raise ValueError(f"Subred no válida: {str(e)}")
 
 class NetworkScannerApp:
-    def __init__(self, root):
+    def _init_(self, root):
         self.root = root
         self.root.title("Escáner Avanzado de Red")
         self.root.geometry("900x750")
         
-        # Variables para controlar el escaneo en curso
         self.scan_in_progress = False
         self.scan_cancelled = False
         self.scan_window = None
@@ -226,26 +219,20 @@ class NetworkScannerApp:
         main_frame = ttk.Frame(self.root)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
-        # Notebook (Pestañas)
         notebook = ttk.Notebook(main_frame)
         notebook.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
         
-        # Pestaña de Escaneo de Subred
         self.create_subnet_tab(notebook)
         
-        # Pestaña de Escaneo de Hosts
         self.create_hosts_tab(notebook)
         
-        # Frame para botones inferiores
         button_frame = ttk.Frame(main_frame)
         button_frame.pack(fill=tk.X, pady=5)
         
-        # Botón para guardar resultados
         self.save_button = ttk.Button(button_frame, text="Guardar Resultado", 
                                     command=self.save_results, style="Bold.TButton")
         self.save_button.pack(side=tk.LEFT, padx=5)
         
-        # Área de resultados
         result_frame = ttk.LabelFrame(main_frame, text="Resultados", padding=10)
         result_frame.pack(fill=tk.BOTH, expand=True)
         
@@ -256,7 +243,6 @@ class NetworkScannerApp:
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.result_text.pack(fill=tk.BOTH, expand=True)
         
-        # Barra de estado
         self.status_var = tk.StringVar(value="Listo")
         status_bar = ttk.Label(main_frame, textvariable=self.status_var, 
                              relief=tk.SUNKEN, anchor=tk.W)
@@ -366,7 +352,6 @@ class NetworkScannerApp:
         self.scan_window.resizable(False, False)
         self.scan_window.protocol("WM_DELETE_WINDOW", self.cancel_scan_from_window)
         
-        # Centrar la ventana sobre la principal
         main_x = self.root.winfo_x()
         main_y = self.root.winfo_y()
         main_width = self.root.winfo_width()
@@ -379,7 +364,6 @@ class NetworkScannerApp:
         
         self.scan_window.geometry(f"+{pos_x}+{pos_y}")
         
-        # Contenido de la ventana
         frame = ttk.Frame(self.scan_window, padding=20)
         frame.pack(fill=tk.BOTH, expand=True)
         
@@ -393,7 +377,6 @@ class NetworkScannerApp:
         self.progress_bar.pack(fill=tk.X, pady=5)
         self.progress_bar.start(10)
         
-        # Botón de cancelar más visible
         cancel_btn = ttk.Button(frame, text="Cancelar Escaneo", 
                               command=self.cancel_scan_from_window,
                               style="Bold.TButton")
@@ -482,10 +465,8 @@ class NetworkScannerApp:
         self.status_var.set(f"Escaneando subred {subnet}...")
         self.root.update()
         
-        # Crear evento para detener el escaneo
         self.stop_event = threading.Event()
         
-        # Ejecutar el escaneo en un hilo separado
         scan_thread = threading.Thread(
             target=self.run_subnet_scan,
             args=(subnet, ports, scan_ports, timeout),
@@ -544,10 +525,8 @@ class NetworkScannerApp:
         self.status_var.set(f"Escaneando host {host}...")
         self.root.update()
         
-        # Crear evento para detener el escaneo
         self.stop_event = threading.Event()
         
-        # Ejecutar el escaneo en un hilo separado
         scan_thread = threading.Thread(
             target=self.run_port_scan,
             args=(host, ports, timeout),
@@ -571,7 +550,6 @@ class NetworkScannerApp:
                 self.on_scan_complete("Escaneo cancelado")
                 return
                 
-            # Obtener el nombre del host
             host_name = None
             try:
                 host_name = socket.gethostbyaddr(host)[0]
@@ -592,7 +570,6 @@ class NetworkScannerApp:
         self.scan_host_button.config(state=tk.DISABLED)
         self.save_button.config(state=tk.DISABLED)
         
-        # Mostrar ventana de escaneo
         target = self.subnet_entry.get() if hasattr(self, 'subnet_entry') else self.host_entry.get()
         self.show_scan_window(target)
         
@@ -605,7 +582,6 @@ class NetworkScannerApp:
         self.save_button.config(state=tk.NORMAL)
         self.status_var.set(message)
         
-        # Cerrar ventana de escaneo
         self.close_scan_window()
     
     def update_scan_progress(self, message):
@@ -685,7 +661,7 @@ class NetworkScannerApp:
         
         filepath = filedialog.asksaveasfilename(
             defaultextension=".txt",
-            filetypes=[("Archivos de texto", "*.txt"), ("Todos los archivos", "*.*")],
+            filetypes=[("Archivos de texto", ".txt"), ("Todos los archivos", ".*")],
             initialfile=default_filename
         )
         
@@ -699,7 +675,7 @@ class NetworkScannerApp:
         except Exception as e:
             messagebox.showerror("Error", f"No se pudo guardar el archivo:\n{str(e)}")
 
-if __name__ == "__main__":
+if _name_ == "_main_":
     root = tk.Tk()
     app = NetworkScannerApp(root)
     
@@ -708,7 +684,6 @@ if __name__ == "__main__":
             "Advertencia", 
             "El escaneo SYN no está disponible. Instale Scapy con: pip install scapy")
     
-    # Configurar el protocolo para manejar cierre de ventana durante escaneo
     def on_closing():
         if app.scan_in_progress:
             if messagebox.askokcancel("Salir", "Hay un escaneo en progreso. ¿Desea cancelar y salir?"):
