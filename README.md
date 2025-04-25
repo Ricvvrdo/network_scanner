@@ -1,3 +1,16 @@
+import tkinter as tk            # GUI principal
+from tkinter import ttk         # Widgets modernos
+from tkinter import messagebox  # Ventanas emergentes
+from tkinter import filedialog  # Diálogos de archivos
+import socket                   # Conexiones de red
+import ipaddress                # Manejo de IPs/subredes
+import subprocess               # Ejecución de comandos
+import platform                 # Info del sistema operativo
+import threading                # Concurrencia
+import time                     # Control de tiempos
+from datetime import datetime   # Manejo de fechas/horas
+import sys                      # Sistema/interprete
+import os                       # Funciones del OS
 # Configuración para evitar ventanas CMD no deseadas
 if getattr(sys, 'frozen', False):
     # Si estamos ejecutando como .exe
@@ -706,6 +719,3 @@ if __name__ == "__main__":
     
     root.protocol("WM_DELETE_WINDOW", on_closing)
     root.mainloop()
-
-
-#Autores: Alexis Callejas, Ricardo Duarte, Benjamin Rojas
