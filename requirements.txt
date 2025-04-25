@@ -1,19 +1,18 @@
-# Bibliotecas 
-import tkinter as tk            # GUI principal
-from tkinter import ttk         # Widgets modernos
-from tkinter import messagebox  # Ventanas emergentes
-from tkinter import filedialog  # Diálogos de archivos
-import socket                   # Conexiones de red
-import ipaddress                # Manejo de IPs/subredes
-import subprocess               # Ejecución de comandos
-import platform                 # Info del sistema operativo
-import threading                # Concurrencia
-import time                     # Control de tiempos
-from datetime import datetime   # Manejo de fechas/horas
-import sys                      # Sistema/interprete
-import os                       # Funciones del OS
-# Biblioteca externa
-# Escaneo avanzado (requiere instalación)
-from scapy.all import IP, TCP, sr1, conf  # pip install scapy
-#SI NO HAY UNA BIBLIOTEVA PRINCIPAL (Tkinker, Socket, ipaddress, concurrent.futures, threading) EL PROGRAMA NO SERA EJECUTADO
-#EN CASO DE QUE FALTE UNA BIBLIOTECA SECUNDARIA, EL PROGRAMA SE ADAPATARA. (scapy, subprocess, datetime, os, sys)
+# Requisitos principales
+
+import tkinter as tk                     # Interfaz gráfica principal
+from tkinter import ttk, messagebox, filedialog  # Widgets avanzados, mensajes emergentes y diálogos de archivo
+
+import ipaddress                         # Validación y manejo de direcciones IP y subredes
+import socket                            # Escaneo de puertos y conexiones TCP/IP
+import subprocess                        # Ejecutar comandos del sistema, como 'ping'
+import platform                          # Detectar sistema operativo para adaptar comandos
+
+from concurrent.futures import ThreadPoolExecutor, as_completed, FIRST_COMPLETED  
+# Ejecución concurrente para escaneos multihilo
+
+import time                              # Delays y medición de tiempo
+from datetime import datetime            # Timestamps para los logs y reportes
+import threading                         # Gestión de hilos manuales para tareas en paralelo
+
+# Todos estos módulos vienen con la instalación estándar de Python (no necesitas instalar nada extra con pip)
